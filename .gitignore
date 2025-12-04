@@ -1,0 +1,88 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# Next.js
+.next/
+.vercel/
+out/
+
+# Build outputs
+dist/
+build/
+
+# Rust / Anchor target directory
+census/target/
+
+# Solana test ledger (local validator data)
+census/test-ledger/
+test-ledger/
+
+# Keypair files (contain private keys - NEVER commit these!)
+*-keypair.json
+*.keypair.json
+verifier-keypair.json
+
+# Circuit build artifacts (large binary files)
+census/circuits/build/
+*.ptau
+*.zkey
+*.r1cs
+*.sym
+*.wtns
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Debug
+debug/
+
+# Miscellaneous
+*.pem
+*.key
+
+# Solana specific
+.anchor/
+
+# Local data files that may contain sensitive info
+indexer/data/*.json
+!indexer/data/.gitkeep
+
+# Commitments file (may contain user data)
+census/commitments.json

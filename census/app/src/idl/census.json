@@ -1,0 +1,659 @@
+{
+  "address": "9TNbyekg5Ck8Hx9EMwDNcH97sDZYZJamdvnGFhwH1UsH",
+  "metadata": {
+    "name": "census",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "zk-Census: Privacy-preserving population counter for Network States"
+  },
+  "docs": [
+    "zk-Census: Privacy-Preserving Population Counter for Network States",
+    "",
+    "A Semaphore-style ZK system for Solana that enables:",
+    "- Anonymous membership proofs (Merkle inclusion)",
+    "- Sybil resistance (NFC wristband + admin gatekeeper)",
+    "- Unique counting (nullifier prevents double-voting)",
+    "- Real-time population tracking without doxxing",
+    "",
+    "Architecture:",
+    "- SPL Account Compression for 1M+ citizen Merkle tree",
+    "- Groth16 verification via alt_bn128 syscalls",
+    "- Poseidon hashing for identity commitments"
+  ],
+  "instructions": [
+    {
+      "name": "advance_scope",
+      "docs": [
+        "Advance to the next census scope (admin-only)"
+      ],
+      "discriminator": [
+        81,
+        129,
+        160,
+        42,
+        219,
+        253,
+        185,
+        142
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Admin authority"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "census_state",
+          "docs": [
+            "Census state - must match admin"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  101,
+                  110,
+                  115,
+                  117,
+                  115,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize",
+      "docs": [
+        "Initialize the zk-Census system"
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Admin authority who will register citizens"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "census_state",
+          "docs": [
+            "Main census state PDA"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  101,
+                  110,
+                  115,
+                  117,
+                  115,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "scope_duration",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "register_citizen",
+      "docs": [
+        "Register a new citizen (admin-only, after NFC verification)"
+      ],
+      "discriminator": [
+        241,
+        250,
+        3,
+        236,
+        214,
+        25,
+        141,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "docs": [
+            "Admin authority (gatekeeper)"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "census_state",
+          "docs": [
+            "Census state - must match admin"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  101,
+                  110,
+                  115,
+                  117,
+                  115,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "identity_commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "submit_census",
+      "docs": [
+        "Submit a census proof (anyone with valid proof)"
+      ],
+      "discriminator": [
+        222,
+        160,
+        8,
+        83,
+        160,
+        212,
+        141,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Anyone can submit (the proof speaks for itself)"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "census_state",
+          "docs": [
+            "Census state for verification"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  101,
+                  110,
+                  115,
+                  117,
+                  115,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "nullifier",
+          "docs": [
+            "Nullifier PDA - created if proof is valid (prevents double-counting)",
+            "Derived from nullifier_hash in public_inputs[1]"
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof_a",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        },
+        {
+          "name": "proof_b",
+          "type": {
+            "array": [
+              "u8",
+              128
+            ]
+          }
+        },
+        {
+          "name": "proof_c",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        },
+        {
+          "name": "public_inputs",
+          "type": {
+            "array": [
+              {
+                "array": [
+                  "u8",
+                  32
+                ]
+              },
+              4
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CensusState",
+      "discriminator": [
+        48,
+        23,
+        49,
+        97,
+        94,
+        142,
+        241,
+        207
+      ]
+    },
+    {
+      "name": "Nullifier",
+      "discriminator": [
+        18,
+        56,
+        142,
+        165,
+        181,
+        158,
+        187,
+        133
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CensusCounted",
+      "discriminator": [
+        232,
+        27,
+        157,
+        49,
+        78,
+        30,
+        117,
+        247
+      ]
+    },
+    {
+      "name": "CitizenRegistered",
+      "discriminator": [
+        170,
+        129,
+        158,
+        81,
+        238,
+        197,
+        71,
+        145
+      ]
+    },
+    {
+      "name": "ScopeAdvanced",
+      "discriminator": [
+        213,
+        160,
+        31,
+        77,
+        56,
+        151,
+        11,
+        0
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidProof",
+      "msg": "Invalid ZK proof - verification failed"
+    },
+    {
+      "code": 6001,
+      "name": "NullifierAlreadyUsed",
+      "msg": "Nullifier has already been used in this census scope"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidMerkleRoot",
+      "msg": "Merkle root does not match current census state"
+    },
+    {
+      "code": 6003,
+      "name": "UnauthorizedAdmin",
+      "msg": "Only the admin can register new citizens"
+    },
+    {
+      "code": 6004,
+      "name": "CensusScopeExpired",
+      "msg": "Census scope has expired"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidCommitment",
+      "msg": "Invalid identity commitment format"
+    },
+    {
+      "code": 6006,
+      "name": "TreeFull",
+      "msg": "Merkle tree is full - maximum capacity reached"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidProofFormat",
+      "msg": "Invalid proof format - wrong byte length"
+    },
+    {
+      "code": 6008,
+      "name": "CensusNotActive",
+      "msg": "Census is not currently active"
+    },
+    {
+      "code": 6009,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow in population counter"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidSignalHash",
+      "msg": "Invalid signal hash"
+    }
+  ],
+  "types": [
+    {
+      "name": "CensusCounted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nullifier_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "scope",
+            "type": "u64"
+          },
+          {
+            "name": "new_population",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CensusState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "Admin authority who can register citizens"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "merkle_root",
+            "docs": [
+              "Current Merkle tree root (updated on each registration)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "merkle_tree",
+            "docs": [
+              "Address of the SPL Concurrent Merkle Tree account"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "current_scope",
+            "docs": [
+              "Current census scope (e.g., week number for weekly census)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "scope_start_time",
+            "docs": [
+              "Timestamp when current scope started"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "scope_duration",
+            "docs": [
+              "Duration of each census scope in seconds (e.g., 1 week = 604800)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "total_registered",
+            "docs": [
+              "Total number of unique citizens registered (all-time)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "current_population",
+            "docs": [
+              "Population count for current census scope"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "leaf_count",
+            "docs": [
+              "Number of leaves in the Merkle tree"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "is_active",
+            "docs": [
+              "Is census currently accepting submissions?"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for PDA derivation"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CitizenRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "leaf_index",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Nullifier",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nullifier_hash",
+            "docs": [
+              "The nullifier hash (32 bytes from Poseidon)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "scope",
+            "docs": [
+              "Census scope this nullifier was used in"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "docs": [
+              "Timestamp of submission"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for PDA derivation"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScopeAdvanced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_scope",
+            "type": "u64"
+          },
+          {
+            "name": "new_scope",
+            "type": "u64"
+          },
+          {
+            "name": "final_population",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}
