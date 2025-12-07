@@ -2,10 +2,12 @@
  * API Route: POST /api/admin/reject
  * 
  * Rejects a registration request with a reason.
+ * Proxies to the indexer service.
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getRegistrationStore } from '../../../lib/registrationStore';
+
+const INDEXER_API_URL = process.env.INDEXER_API_URL || 'http://localhost:4000';
 
 export default async function handler(
   req: NextApiRequest,
@@ -22,42 +24,23 @@ export default async function handler(
       return res.status(400).json({ error: 'Request ID required' });
     }
 
-    // TODO: In production, verify adminPubkey is in allowed admins list
-
-    const store = getRegistrationStore();
-    const request = store.getRequestById(requestId);
-
-    if (!request) {
-      return res.status(404).json({
-        success: false,
-        error: 'Request not found',
-      });
-    }
-
-    if (request.status !== 'pending') {
-      return res.status(400).json({
-        success: false,
-        error: `Request is already ${request.status}`,
-      });
-    }
-
-    // Reject the request
-    const rejected = store.rejectRequest(
-      requestId, 
-      reason || 'Rejected by admin'
-    );
-
-    if (!rejected) {
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to reject request',
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Registration request rejected',
+    // Proxy to indexer service
+    const indexerRes = await fetch(`${INDEXER_API_URL}/api/admin/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, adminPubkey, reason }),
     });
+
+    const data = await indexerRes.json();
+    return res.status(indexerRes.status).json(data);
+  } catch (error: any) {
+    console.error('Error rejecting registration:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error',
+    });
+  }
+}
   } catch (error: any) {
     console.error('Error rejecting registration:', error);
     return res.status(500).json({

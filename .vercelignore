@@ -1,0 +1,52 @@
+# Solana test ledger (contains locked files)
+census/test-ledger/
+test-ledger/
+
+# Build artifacts
+census/target/
+target/
+
+# Node modules
+node_modules/
+**/node_modules/
+
+# Rust/Cargo
+*.so
+*.rlib
+
+# Local development files
+.anchor/
+.DS_Store
+
+# Circuit build files (large)
+census/circuits/build/
+circuits/build/
+*.ptau
+*.zkey
+*.r1cs
+*.sym
+*.wasm
+
+# Test files
+tests/
+census/tests/
+
+# Indexer (separate service)
+indexer/
+
+# API (separate service)
+api/
+
+# Development scripts
+scripts/
+census/scripts/
+
+# Git
+.git/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

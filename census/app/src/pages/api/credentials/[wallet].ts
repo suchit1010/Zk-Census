@@ -2,11 +2,12 @@
  * API Route: GET /api/credentials/[wallet]
  * 
  * Returns ZK census credentials for an approved wallet.
- * These credentials are generated during the admin approval process.
+ * Proxies to the indexer service which manages the registration data.
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getRegistrationStore } from '../../../lib/registrationStore';
+
+const INDEXER_API_URL = process.env.INDEXER_API_URL || 'http://localhost:4000';
 
 export default async function handler(
   req: NextApiRequest,
@@ -23,46 +24,11 @@ export default async function handler(
       return res.status(400).json({ error: 'Wallet address required' });
     }
 
-    const store = getRegistrationStore();
-    const request = store.getRequestByWallet(wallet);
-
-    if (!request) {
-      return res.status(404).json({
-        found: false,
-        error: 'No registration found for this wallet',
-      });
-    }
-
-    if (request.status !== 'approved') {
-      return res.status(400).json({
-        found: true,
-        status: request.status,
-        error: request.status === 'pending' 
-          ? 'Registration is still pending approval'
-          : 'Registration was rejected',
-      });
-    }
-
-    if (!request.credentials) {
-      return res.status(400).json({
-        found: true,
-        status: 'approved',
-        error: 'Credentials not yet generated. Please wait for the admin to complete the on-chain registration.',
-      });
-    }
-
-    return res.status(200).json({
-      found: true,
-      status: 'approved',
-      credentials: {
-        identityNullifier: request.credentials.identityNullifier,
-        identityTrapdoor: request.credentials.identityTrapdoor,
-        identityCommitment: request.credentials.identityCommitment,
-        leafIndex: request.leafIndex,
-        registeredAt: request.processedAt,
-        zassportCommitment: request.zassportCommitment,
-      },
-    });
+    // Proxy to indexer service
+    const indexerRes = await fetch(`${INDEXER_API_URL}/api/credentials/${wallet}`);
+    const data = await indexerRes.json();
+    
+    return res.status(indexerRes.status).json(data);
   } catch (error: any) {
     console.error('Error fetching credentials:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });

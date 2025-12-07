@@ -9,6 +9,7 @@ import {
   IdentityGenerator,
   RequestStatus 
 } from './registration.js';
+import { createAdminService } from './adminService.js';
 
 const app = express();
 const PORT = 4000;
@@ -22,14 +23,26 @@ const zassportVerifier = new ZassportVerifier(connection);
 const ADMIN_SALT = process.env.ADMIN_SALT || 'census-admin-salt-change-in-production';
 const identityGenerator = new IdentityGenerator(ADMIN_SALT);
 
+// Admin service for auto-approval (loads admin keypair)
+let adminService = null;
+
 app.use(cors());
 app.use(express.json());
 
-// Initialize storage on startup
+// Initialize storage and admin service on startup
 async function initializeStorage() {
   await Storage.initialize();
   await RegistrationQueue.initialize();
   console.log('📦 Storage initialized');
+  
+  // Initialize admin service for auto-approval
+  adminService = await createAdminService(connection);
+  if (adminService.isReady()) {
+    console.log('🔑 Admin service ready for auto-approval');
+  } else {
+    console.log('⚠️ Admin service not ready - manual approval required');
+    console.log('   To enable auto-approval, copy admin keypair to ./data/admin-keypair.json');
+  }
 }
 initializeStorage().catch(console.error);
 
@@ -199,6 +212,27 @@ app.get('/tree-info', async (req, res) => {
   }
 });
 
+// Get all registered citizens
+app.get('/api/citizens', async (req, res) => {
+  try {
+    const citizens = await Storage.loadCitizens();
+    const treeData = await Storage.loadTree();
+    
+    res.json({
+      citizens: citizens.map((c, i) => ({
+        commitment: c.commitment,
+        leafIndex: c.leafIndex ?? i,
+        registeredAt: c.registeredAt,
+      })),
+      total: citizens.length,
+      treeLeafCount: treeData.leaves?.length || 0,
+    });
+  } catch (error) {
+    console.error('Error fetching citizens:', error);
+    res.status(500).json({ error: 'Failed to load citizens', citizens: [] });
+  }
+});
+
 // ============================================================
 // REGISTRATION REQUEST ENDPOINTS (Zassport Integration)
 // ============================================================
@@ -229,6 +263,8 @@ app.get('/api/zassport/verify/:wallet', async (req, res) => {
  * Submit registration request
  * POST /api/registration/request
  * Body: { walletPubkey: string }
+ * 
+ * If admin service is ready, this will AUTO-APPROVE valid Zassport holders
  */
 app.post('/api/registration/request', async (req, res) => {
   try {
@@ -239,6 +275,28 @@ app.post('/api/registration/request', async (req, res) => {
     }
     
     console.log(`📝 New registration request from: ${walletPubkey.slice(0, 8)}...`);
+    
+    // Check if already registered on-chain
+    if (adminService?.isReady()) {
+      const alreadyRegistered = await adminService.isWalletRegistered(walletPubkey);
+      if (alreadyRegistered) {
+        // Try to find their credentials
+        const existingRequest = await RegistrationQueue.getRequestByWallet(walletPubkey);
+        console.log(`⚠️ Wallet ${walletPubkey.slice(0, 8)}... is already registered`);
+        return res.status(200).json({
+          success: true,
+          alreadyRegistered: true,
+          request: existingRequest ? {
+            id: existingRequest.id,
+            status: existingRequest.status,
+            walletPubkey: existingRequest.walletPubkey,
+            requestedAt: existingRequest.requestedAt,
+            leafIndex: existingRequest.leafIndex,
+          } : null,
+          message: 'This wallet is already registered in the census. Use your existing credentials.'
+        });
+      }
+    }
     
     // Verify Zassport attestation
     const zassportResult = await zassportVerifier.verifyAttestation(walletPubkey);
@@ -251,6 +309,124 @@ app.post('/api/registration/request', async (req, res) => {
       });
     }
     
+    console.log(`✅ Zassport verified for ${walletPubkey.slice(0, 8)}...`);
+    
+    // ============================================================
+    // AUTO-APPROVAL: If admin service is ready, approve immediately
+    // ============================================================
+    if (adminService?.isReady()) {
+      console.log(`🚀 Auto-approval enabled - processing immediately...`);
+      
+      try {
+        // Generate identity
+        const identity = await identityGenerator.generateIdentity(
+          walletPubkey,
+          zassportResult.attestation?.passportHash || 'zassport-verified'
+        );
+        
+        // Register on-chain using admin keypair
+        const onChainResult = await adminService.registerCitizenOnChain(
+          walletPubkey,
+          identity.commitment,
+          identity.identityNullifier  // Fixed: was nullifierHash
+        );
+        
+        // Add to Merkle tree
+        const treeData = await Storage.loadTree();
+        if (!treeData.leaves) treeData.leaves = [];
+        
+        treeData.leaves.push(identity.commitment);
+        const leafIndex = treeData.leaves.length - 1;
+        
+        // Rebuild tree
+        const tree = new IncrementalMerkleTree();
+        await tree.initialize();
+        for (const leaf of treeData.leaves) {
+          tree.insert(leaf);
+        }
+        
+        // Save tree
+        await Storage.saveTree(tree);
+        
+        // Save citizen record
+        await Storage.saveCitizen({
+          commitment: identity.commitment,
+          leafIndex,
+          walletPubkey,
+          registeredAt: new Date().toISOString(),
+          txSignature: onChainResult.signature
+        });
+        
+        // Create approved request record WITH credentials
+        const request = {
+          id: RegistrationQueue.generateRequestId(),
+          walletPubkey,
+          zassportPDA: zassportResult.attestation?.pda,
+          zassportData: zassportResult.attestation,
+          requestedAt: Date.now(),
+          status: RequestStatus.APPROVED,
+          processedAt: Date.now(),
+          processedBy: adminService.getAdminPubkey(),
+          identityCommitment: identity.commitment,
+          leafIndex,
+          // Store credentials for later retrieval
+          credentials: {
+            identityNullifier: identity.identityNullifier,
+            identityTrapdoor: identity.identityTrapdoor,
+            commitment: identity.commitment,
+          }
+        };
+        
+        // Save to registration queue for tracking
+        const requests = await RegistrationQueue.loadRequests();
+        requests.push(request);
+        await RegistrationQueue.saveRequests(requests);
+        
+        // Encrypt credentials for delivery
+        const encryptedCredentials = identityGenerator.encryptCredentials(
+          {
+            identityNullifier: identity.identityNullifier,
+            identityTrapdoor: identity.identityTrapdoor,
+            commitment: identity.commitment,
+            leafIndex
+          },
+          walletPubkey
+        );
+        
+        console.log(`✅ Auto-approved! Leaf index: ${leafIndex}`);
+        
+        return res.json({
+          success: true,
+          autoApproved: true,
+          request: {
+            id: request.id,
+            status: RequestStatus.APPROVED,
+            walletPubkey: request.walletPubkey,
+            requestedAt: request.requestedAt
+          },
+          registration: {
+            leafIndex,
+            commitment: identity.commitment,
+            merkleRoot: tree.getRoot(),
+            txSignature: onChainResult.signature,
+            citizenPDA: onChainResult.citizenPDA
+          },
+          encryptedCredentials,
+          message: 'Registration auto-approved! Your ZK credentials are ready.'
+        });
+        
+      } catch (autoApproveError) {
+        console.error(`❌ Auto-approval failed: ${autoApproveError.message}`);
+        console.log(`   Falling back to manual approval queue...`);
+        // Fall through to manual approval queue
+      }
+    }
+    
+    // ============================================================
+    // MANUAL APPROVAL: Queue for admin review
+    // ============================================================
+    console.log(`📋 Queuing for manual approval...`);
+    
     // Create registration request
     const request = await RegistrationQueue.createRequest(
       walletPubkey,
@@ -262,6 +438,7 @@ app.post('/api/registration/request', async (req, res) => {
     
     res.json({
       success: true,
+      autoApproved: false,
       request: {
         id: request.id,
         status: request.status,
@@ -273,6 +450,23 @@ app.post('/api/registration/request', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Registration request error:', error);
+    
+    // Handle "already registered" case - return existing registration info
+    if (error.message === 'Wallet is already registered' && error.existingRequest) {
+      return res.status(200).json({
+        success: true,
+        alreadyRegistered: true,
+        request: {
+          id: error.existingRequest.id,
+          status: error.existingRequest.status,
+          walletPubkey: error.existingRequest.walletPubkey,
+          requestedAt: error.existingRequest.requestedAt,
+          leafIndex: error.existingRequest.leafIndex,
+        },
+        message: 'Wallet is already registered. Use your existing credentials.'
+      });
+    }
+    
     res.status(400).json({ 
       success: false, 
       error: error.message 
@@ -328,10 +522,119 @@ app.get('/api/admin/pending', async (req, res) => {
     
     res.json({
       pending,
-      stats
+      stats,
+      autoApprovalEnabled: adminService?.isReady() || false
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get pending requests' });
+  }
+});
+
+/**
+ * Auto-process all pending requests (if admin service is ready)
+ * POST /api/admin/auto-process
+ * This will auto-approve all valid pending requests using the server's admin keypair
+ */
+app.post('/api/admin/auto-process', async (req, res) => {
+  try {
+    if (!adminService?.isReady()) {
+      return res.status(503).json({ 
+        error: 'Admin service not ready',
+        message: 'Auto-approval is not available. Admin keypair not loaded.'
+      });
+    }
+
+    const pending = await RegistrationQueue.getPendingRequests();
+    console.log(`🔄 Auto-processing ${pending.length} pending requests...`);
+
+    const results = [];
+    
+    for (const request of pending) {
+      try {
+        console.log(`  Processing ${request.id} for ${request.walletPubkey.slice(0, 8)}...`);
+        
+        // Generate identity
+        const identity = await identityGenerator.generateIdentity(
+          request.walletPubkey,
+          request.zassportData?.passportHash || 'zassport-verified'
+        );
+        
+        // Register on-chain using admin keypair
+        const onChainResult = await adminService.registerCitizenOnChain(
+          request.walletPubkey,
+          identity.commitment,
+          identity.nullifierHash
+        );
+        
+        // Add to Merkle tree
+        const treeData = await Storage.loadTree();
+        if (!treeData.leaves) treeData.leaves = [];
+        
+        treeData.leaves.push(identity.commitment);
+        const leafIndex = treeData.leaves.length - 1;
+        
+        // Rebuild tree
+        const tree = new IncrementalMerkleTree();
+        await tree.initialize();
+        for (const leaf of treeData.leaves) {
+          tree.insert(leaf);
+        }
+        
+        // Save tree
+        await Storage.saveTree(tree);
+        
+        // Save citizen record
+        await Storage.saveCitizen({
+          commitment: identity.commitment,
+          leafIndex,
+          walletPubkey: request.walletPubkey,
+          registeredAt: new Date().toISOString(),
+          txSignature: onChainResult.signature
+        });
+        
+        // Update request status with credentials
+        await RegistrationQueue.approveRequest(
+          request.id,
+          adminService.getAdminPubkey(),
+          identity.commitment,
+          leafIndex,
+          {
+            identityNullifier: identity.identityNullifier,
+            identityTrapdoor: identity.identityTrapdoor,
+            commitment: identity.commitment,
+          }
+        );
+        
+        results.push({
+          requestId: request.id,
+          wallet: request.walletPubkey,
+          success: true,
+          leafIndex,
+          txSignature: onChainResult.signature
+        });
+        
+        console.log(`  ✅ Approved: ${request.id}`);
+        
+      } catch (err) {
+        console.error(`  ❌ Failed: ${request.id} - ${err.message}`);
+        results.push({
+          requestId: request.id,
+          wallet: request.walletPubkey,
+          success: false,
+          error: err.message
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      processed: results.length,
+      results
+    });
+    
+  } catch (error) {
+    console.error('❌ Auto-process error:', error);
+    res.status(500).json({ error: 'Auto-process failed', message: error.message });
   }
 });
 
@@ -388,12 +691,17 @@ app.post('/api/admin/approve', async (req, res) => {
       requestId: request.id
     });
     
-    // Update request status
+    // Update request status with credentials
     await RegistrationQueue.approveRequest(
       requestId, 
       adminPubkey, 
       identity.commitment,
-      leafIndex
+      leafIndex,
+      {
+        identityNullifier: identity.identityNullifier,
+        identityTrapdoor: identity.identityTrapdoor,
+        commitment: identity.commitment,
+      }
     );
     
     // Encrypt credentials for delivery
@@ -468,22 +776,38 @@ app.get('/api/credentials/:wallet', async (req, res) => {
     const wallet = req.params.wallet;
     const request = await RegistrationQueue.getRequestByWallet(wallet);
     
-    if (!request || request.status !== RequestStatus.APPROVED) {
+    if (!request) {
       return res.status(404).json({ 
-        error: 'No approved registration found for this wallet' 
+        found: false,
+        error: 'No registration found for this wallet' 
       });
     }
     
-    // Return encrypted credentials that user can decrypt with their wallet
-    // In production, this would use proper asymmetric encryption
+    if (request.status !== RequestStatus.APPROVED) {
+      return res.status(400).json({ 
+        found: true,
+        status: request.status,
+        error: request.status === 'pending' 
+          ? 'Registration is still pending approval'
+          : 'Registration was rejected'
+      });
+    }
+    
+    // Return credentials for the user
     res.json({
       found: true,
-      leafIndex: request.leafIndex,
-      commitment: request.identityCommitment,
-      message: 'Use your wallet to decrypt credentials in the frontend'
+      status: 'approved',
+      credentials: {
+        identityNullifier: request.credentials?.identityNullifier || request.identityNullifier,
+        identityTrapdoor: request.credentials?.identityTrapdoor || request.identityTrapdoor,
+        identityCommitment: request.credentials?.commitment || request.identityCommitment,
+        leafIndex: request.leafIndex,
+        registeredAt: request.processedAt,
+      }
     });
     
   } catch (error) {
+    console.error('Error getting credentials:', error);
     res.status(500).json({ error: 'Failed to get credentials' });
   }
 });

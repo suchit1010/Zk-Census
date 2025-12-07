@@ -2,11 +2,12 @@
  * API Route: GET /api/registration/status/[wallet]
  * 
  * Returns the registration status for a given wallet address.
- * This checks against the in-memory registration queue and Merkle tree.
+ * Proxies to the indexer service which manages the actual registration data.
  */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getRegistrationStore } from '../../../../lib/registrationStore';
+
+const INDEXER_API_URL = process.env.INDEXER_API_URL || 'http://localhost:4000';
 
 export default async function handler(
   req: NextApiRequest,
@@ -23,27 +24,11 @@ export default async function handler(
       return res.status(400).json({ error: 'Wallet address required' });
     }
 
-    const store = getRegistrationStore();
-    const request = store.getRequestByWallet(wallet);
-
-    if (!request) {
-      return res.status(200).json({
-        found: false,
-        request: null,
-      });
-    }
-
-    return res.status(200).json({
-      found: true,
-      request: {
-        id: request.id,
-        status: request.status,
-        requestedAt: request.requestedAt,
-        processedAt: request.processedAt,
-        leafIndex: request.leafIndex,
-        rejectionReason: request.rejectionReason,
-      },
-    });
+    // Proxy to indexer service
+    const indexerRes = await fetch(`${INDEXER_API_URL}/api/registration/status/${wallet}`);
+    const data = await indexerRes.json();
+    
+    return res.status(indexerRes.status).json(data);
   } catch (error: any) {
     console.error('Error checking registration status:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });

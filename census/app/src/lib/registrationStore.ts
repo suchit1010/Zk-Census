@@ -14,9 +14,15 @@ export interface RegistrationRequest {
   zassportNullifier?: string;
   zassportPDA?: string;
   zassportData?: {
-    ageVerified: boolean;
-    nationalityVerified: boolean;
+    ageVerified?: boolean;
+    nationalityVerified?: boolean;
+    sanctionsVerified?: boolean;
     nationality?: number;
+    isValid?: boolean;
+    isAdult?: boolean;
+    passportHash?: string;
+    verifiedAt?: number;
+    expiresAt?: number;
   };
   status: 'pending' | 'approved' | 'rejected';
   requestedAt: number;
@@ -57,11 +63,23 @@ class RegistrationStore {
     zassportNullifier?: string;
     zassportPDA?: string;
     zassportData?: {
-      ageVerified: boolean;
-      nationalityVerified: boolean;
+      ageVerified?: boolean;
+      nationalityVerified?: boolean;
+      sanctionsVerified?: boolean;
       nationality?: number;
+      isValid?: boolean;
+      isAdult?: boolean;
+      passportHash?: string | null;
+      verifiedAt?: number;
+      expiresAt?: number;
     };
   }): RegistrationRequest {
+    // Normalize zassportData (convert null to undefined)
+    const normalizedZassportData = data.zassportData ? {
+      ...data.zassportData,
+      passportHash: data.zassportData.passportHash ?? undefined,
+    } : undefined;
+    
     // Check if wallet already has a request
     const existingId = this.walletToRequest.get(data.walletPubkey);
     if (existingId) {
@@ -74,7 +92,7 @@ class RegistrationStore {
         existing.processedAt = undefined;
         existing.zassportCommitment = data.zassportCommitment;
         existing.zassportNullifier = data.zassportNullifier;
-        existing.zassportData = data.zassportData;
+        existing.zassportData = normalizedZassportData;
         return existing;
       }
       if (existing) {
@@ -89,7 +107,7 @@ class RegistrationStore {
       zassportCommitment: data.zassportCommitment,
       zassportNullifier: data.zassportNullifier,
       zassportPDA: data.zassportPDA,
-      zassportData: data.zassportData,
+      zassportData: normalizedZassportData,
       status: 'pending',
       requestedAt: Date.now(),
     };

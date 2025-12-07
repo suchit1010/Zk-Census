@@ -86,3 +86,5 @@ indexer/data/*.json
 
 # Commitments file (may contain user data)
 census/commitments.json
+.vercel
+.env*.local

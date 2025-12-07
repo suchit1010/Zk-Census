@@ -1,12 +1,11 @@
 import Head from 'next/head';
-import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { useWallet } from '@solana/wallet-adapter-react';
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { ToastContainer } from '@/components/Toast';
 import { useToast } from '@/hooks/useToast';
-import { buildRegisterCitizenTx } from '@/lib/census';
 
 const INDEXER_API_URL = process.env.NEXT_PUBLIC_INDEXER_API_URL || 'http://localhost:4000';
 const ADMIN_PUBKEY = process.env.NEXT_PUBLIC_ADMIN_PUBKEY || '';
@@ -20,6 +19,8 @@ interface PendingRequest {
   id: string;
   walletPubkey: string;
   zassportPDA?: string;
+  nullifier?: string;
+  commitment?: string;
   zassportData?: {
     isValid: boolean;
     isAdult: boolean;
@@ -27,6 +28,7 @@ interface PendingRequest {
     verifiedAt: number;
     expiresAt: number;
     passportHash?: string;
+    sanctionsVerified?: boolean;
   };
   requestedAt: number;
   status: 'pending' | 'approved' | 'rejected';
@@ -91,8 +93,7 @@ function timeAgo(timestamp: number): string {
 }
 
 export default function AdminPage() {
-  const { connected, publicKey, signTransaction } = useWallet();
-  const { connection } = useConnection();
+  const { connected, publicKey } = useWallet();
   const toast = useToast();
 
   const [isAdmin, setIsAdmin] = useState(false);
@@ -119,10 +120,10 @@ export default function AdminPage() {
     }
   }, [publicKey]);
 
-  // Fetch pending requests
+  // Fetch pending requests from indexer API
   const fetchPendingRequests = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/pending');
+      const res = await fetch(`${INDEXER_API_URL}/api/admin/pending`);
       if (res.ok) {
         const data = await res.json();
         setPendingRequests(data.pending || []);
@@ -179,7 +180,7 @@ export default function AdminPage() {
 
   // Approve request
   const handleApprove = async (request: PendingRequest) => {
-    if (!publicKey || !signTransaction) {
+    if (!publicKey) {
       toast.error('Wallet not connected');
       return;
     }
@@ -188,8 +189,8 @@ export default function AdminPage() {
     setIsLoading(true);
 
     try {
-      // 1. Approve in API
-      const approveRes = await fetch('/api/admin/approve', {
+      // Approve in indexer API (handles on-chain registration via admin service)
+      const approveRes = await fetch(`${INDEXER_API_URL}/api/admin/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -204,28 +205,6 @@ export default function AdminPage() {
         throw new Error(approveData.error || 'Approval failed');
       }
 
-      // 2. Register on-chain
-      const commitmentBytes = new Uint8Array(32);
-      let temp = BigInt(approveData.commitment);
-      for (let i = 0; i < 32; i++) {
-        commitmentBytes[i] = Number(temp & 0xFFn);
-        temp >>= 8n;
-      }
-
-      const tx = await buildRegisterCitizenTx({
-        admin: publicKey,
-        identityCommitment: commitmentBytes,
-        connection,
-      });
-
-      const signedTx = await signTransaction(tx);
-      const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-        skipPreflight: false,
-        preflightCommitment: 'confirmed',
-      });
-
-      await connection.confirmTransaction(signature, 'confirmed');
-      
       toast.success('Registration Approved!', `Citizen at leaf #${approveData.leafIndex}`);
       
       fetchPendingRequests();
@@ -252,7 +231,7 @@ export default function AdminPage() {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/admin/reject', {
+      const res = await fetch(`${INDEXER_API_URL}/api/admin/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -616,6 +595,7 @@ export default function AdminPage() {
                           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                <span className="text-xs text-gray-500">Wallet:</span>
                                 <code className="text-sm font-mono bg-black/30 px-2 py-1 rounded truncate max-w-[200px] sm:max-w-none">
                                   {request.walletPubkey}
                                 </code>
@@ -639,6 +619,49 @@ export default function AdminPage() {
                             </div>
                           </div>
 
+                          {/* Zassport Details */}
+                          {request.zassportPDA && (
+                            <div className="mb-4 p-3 bg-blue-900/20 border border-blue-700/30 rounded-lg">
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-medium text-blue-400">🛂 Zassport Identity</h4>
+                                {request.nullifier && (
+                                  <span className="badge badge-success text-[10px]">🔒 Unique Identity</span>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                <div>
+                                  <span className="text-gray-500">PDA:</span>
+                                  <code className="ml-2 font-mono text-emerald-400 break-all">
+                                    {request.zassportPDA.slice(0, 22)}...
+                                  </code>
+                                </div>
+                                {request.nullifier && (
+                                  <div>
+                                    <span className="text-gray-500">Nullifier (Sybil ID):</span>
+                                    <code className="ml-2 font-mono text-amber-400 break-all">
+                                      {request.nullifier.slice(0, 16)}...
+                                    </code>
+                                  </div>
+                                )}
+                              </div>
+                              {request.commitment && (
+                                <div className="mt-2 text-xs">
+                                  <span className="text-gray-500">Commitment:</span>
+                                  <code className="ml-2 font-mono text-purple-400 break-all">
+                                    {request.commitment.slice(0, 16)}...
+                                  </code>
+                                </div>
+                              )}
+                              {request.zassportData?.verifiedAt && request.zassportData.verifiedAt > 0 && (
+                                <p className="text-xs text-gray-500 mt-2">
+                                  Verified: {request.zassportData.verifiedAt > 4102444800 
+                                    ? 'Active' 
+                                    : new Date(request.zassportData.verifiedAt * 1000).toLocaleString()}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
                           <div className="flex flex-col sm:flex-row gap-3">
                             <button
                               onClick={() => handleApprove(request)}
@@ -652,7 +675,7 @@ export default function AdminPage() {
                                   Processing...
                                 </span>
                               ) : (
-                                '✅ Approve'
+                                '✅ Approve & Register On-Chain'
                               )}
                             </button>
                             <button

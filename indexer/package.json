@@ -8,8 +8,9 @@
     "indexer": "node index.js"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.95.8",
     "@coral-xyz/anchor": "^0.32.0",
+    "@solana/web3.js": "^1.95.8",
+    "bn.js": "^5.2.2",
     "circomlibjs": "^0.1.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

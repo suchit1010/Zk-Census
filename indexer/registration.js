@@ -124,14 +124,17 @@ export class RegistrationQueue {
       throw new Error('Pending request already exists for this wallet');
     }
     
-    // Check if already approved
+    // Check if already approved - return existing registration info
     const approved = requests.find(r => 
       r.walletPubkey === walletPubkey && 
       r.status === RequestStatus.APPROVED
     );
     
     if (approved) {
-      throw new Error('Wallet is already registered');
+      // Return the existing approved request instead of throwing
+      const error = new Error('Wallet is already registered');
+      error.existingRequest = approved;
+      throw error;
     }
     
     const request = new RegistrationRequest({
@@ -176,7 +179,7 @@ export class RegistrationQueue {
   /**
    * Approve request (admin)
    */
-  static async approveRequest(requestId, adminPubkey, identityCommitment, leafIndex) {
+  static async approveRequest(requestId, adminPubkey, identityCommitment, leafIndex, credentials = null) {
     const requests = await this.loadRequests();
     const index = requests.findIndex(r => r.id === requestId);
     
@@ -193,6 +196,11 @@ export class RegistrationQueue {
     requests[index].processedBy = adminPubkey;
     requests[index].identityCommitment = identityCommitment;
     requests[index].leafIndex = leafIndex;
+    
+    // Save credentials if provided
+    if (credentials) {
+      requests[index].credentials = credentials;
+    }
     
     await this.saveRequests(requests);
     
