@@ -291,9 +291,14 @@ PHASE 6: ANONYMOUS CENSUS PARTICIPATION
 zk-census/
 ├── api/                     # ZK Verifier API (snarkjs + attestations)
 │   └── server.js            # Real Groth16 verification
-├── indexer/                 # Merkle tree indexer
-│   ├── api.js               # REST API for proofs
-│   └── merkleTree.js        # Incremental Poseidon tree
+├── indexer/                 # Merkle tree indexer & Registration
+│   ├── api.js               # REST API for proofs & registration
+│   ├── merkleTree.js        # Incremental Poseidon tree
+│   ├── registration.js      # Registration queue management
+│   └── data/                # Persistent storage
+│       ├── tree.json        # Merkle tree state (leaves, root)
+│       ├── citizens.json    # Registered citizen index
+│       └── registration_requests.json  # Pending/approved requests
 ├── census/
 │   ├── programs/census/     # Solana Anchor program
 │   │   └── src/
@@ -303,8 +308,28 @@ zk-census/
 │   ├── circuits/            # Circom ZK circuits
 │   │   └── census.circom    # Semaphore-style circuit
 │   └── app/                 # Next.js frontend
+│       └── src/pages/api/   # API routes (proxy to indexer)
 ├── tests/                   # E2E test suite
 └── docs/                    # Documentation
+```
+
+### Data Flow Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        SINGLE SOURCE OF TRUTH                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Next.js Frontend                    Indexer API (Port 4000)           │
+│   ┌─────────────────┐                 ┌─────────────────────────────┐   │
+│   │ /api/registration/* ──proxy──────▶│ Registration & Merkle Tree   │  │
+│   │ /api/credentials/*  ──proxy──────▶│ • registration_requests.json │  │
+│   │ /api/admin/*        ──proxy──────▶│ • tree.json                  │  │
+│   └─────────────────┘                 │ • citizens.json              │  │
+│                                       └─────────────────────────────┘   │
+│                                                                         │
+│   Why: Ensures data consistency across service restarts and deployments │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -332,18 +357,20 @@ cd census/app && npm install && cd ../..
 ### 2. Start Services
 
 ```bash
-# Terminal 1: Verifier API (Real ZK verification)
-cd api && node server.js
-# → Running on http://localhost:3001
-
-# Terminal 2: Indexer API (Merkle tree)
+# Terminal 1: Indexer API (Merkle tree & Registration - MUST START FIRST)
 cd indexer && node api.js
 # → Running on http://localhost:4000
+
+# Terminal 2: Verifier API (Real ZK verification)
+cd api && node server.js
+# → Running on http://localhost:3001
 
 # Terminal 3: Frontend
 cd census/app && npm run dev
 # → Running on http://localhost:3000
 ```
+
+> **Important**: The Indexer API must be running before using the frontend, as all registration and Merkle tree operations are handled by this service.
 
 ### 3. Test the Flow
 
@@ -378,10 +405,23 @@ GET  /health               → Service health check
 
 **Indexer API (Port 4000)**
 ```
+# Merkle Tree
 GET  /merkle-proof/:commitment → Get Merkle proof for identity
 GET  /tree-info                → Current tree state
 GET  /health                   → Service health check
+
+# Registration Flow
+POST /api/registration/request              → Submit registration request
+GET  /api/registration/status/:wallet       → Check registration status
+GET  /api/credentials/:wallet               → Get ZK credentials after approval
+
+# Admin Operations
+GET  /api/admin/pending                     → List pending registrations
+POST /api/admin/approve                     → Approve registration & add to tree
+POST /api/admin/reject                      → Reject registration
 ```
+
+> **Note**: The Next.js frontend API routes (`/api/*`) proxy to the Indexer API to ensure a single source of truth for registration data and Merkle tree state.
 
 ### Performance Metrics
 
