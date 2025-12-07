@@ -467,8 +467,6 @@ POST /api/admin/reject                      → Reject registration
 - [x] Incremental Merkle tree indexer
 - [x] Next.js frontend with wallet adapter
 - [x] E2E test suite
-
-### 🔜 Coming Soon
 - [ ] Zassport integration (passport-based Sybil resistance)
 - [ ] Multi-sig admin governance
 - [ ] Mainnet deployment
