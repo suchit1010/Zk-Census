@@ -12,7 +12,8 @@ import {
 import { createAdminService } from './adminService.js';
 
 const app = express();
-const PORT = 4000;
+// Use the environment-provided port (Render sets PORT) or fallback to 4000 for local dev
+const PORT = process.env.PORT || 4000;
 
 // Solana connection for Zassport verification
 const SOLANA_RPC = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';

@@ -38,6 +38,46 @@ export class AdminService {
    */
   async loadAdminKeypair() {
     try {
+      // First, allow loading admin keypair from an environment variable for secure deployments
+      const envKey = process.env.ADMIN_KEYPAIR_JSON || process.env.ADMIN_KEYPAIR_BASE64;
+      if (envKey) {
+        try {
+          let secretKeyUint8;
+          // If ADMIN_KEYPAIR_JSON is a JSON array string like "[1,2,3,...]"
+          if (envKey.trim().startsWith('[')) {
+            const arr = JSON.parse(envKey);
+            secretKeyUint8 = new Uint8Array(arr);
+          } else {
+            // Try base64 decode
+            const buf = Buffer.from(envKey, 'base64');
+            // Try parse JSON from buffer, else use raw bytes
+            try {
+              const parsed = JSON.parse(buf.toString('utf-8'));
+              secretKeyUint8 = new Uint8Array(parsed);
+            } catch (e) {
+              secretKeyUint8 = new Uint8Array(buf);
+            }
+          }
+
+          this.adminKeypair = Keypair.fromSecretKey(secretKeyUint8);
+          const adminPubkey = this.adminKeypair.publicKey.toBase58();
+          console.log(`✅ Admin keypair loaded from ENV variable: ${adminPubkey}`);
+
+          // Optionally write to disk for other processes that expect a file
+          try {
+            await fs.mkdir(path.dirname(ADMIN_KEYPAIR_PATH), { recursive: true });
+            await fs.writeFile(ADMIN_KEYPAIR_PATH, JSON.stringify(Array.from(secretKeyUint8)), { encoding: 'utf-8' });
+            console.log(`🔐 Admin keypair written to disk at ${ADMIN_KEYPAIR_PATH}`);
+          } catch (writeErr) {
+            console.warn(`⚠️ Failed to write admin keypair to disk: ${writeErr.message}`);
+          }
+
+          return true;
+        } catch (envErr) {
+          console.error(`❌ Failed to parse ADMIN_KEYPAIR env var: ${envErr.message}`);
+        }
+      }
+
       const keypairPath = path.resolve(ADMIN_KEYPAIR_PATH);
       console.log(`📦 Loading admin keypair from: ${keypairPath}`);
       
