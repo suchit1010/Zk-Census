@@ -28,7 +28,4 @@ export default async function handler(
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
-    console.error('Error fetching pending requests:', error);
-    return res.status(500).json({ error: error.message || 'Internal server error' });
-  }
-}
+

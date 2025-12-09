@@ -41,11 +41,4 @@ export default async function handler(
     });
   }
 }
-  } catch (error: any) {
-    console.error('Error rejecting registration:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Internal server error',
-    });
-  }
-}
+
