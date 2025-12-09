@@ -7,7 +7,7 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-const INDEXER_API_URL = process.env.INDEXER_API_URL || 'http://localhost:4000';
+const INDEXER_API_URL = process.env.INDEXER_API_URL || process.env.NEXT_PUBLIC_INDEXER_API_URL || 'http://localhost:4000';
 
 export default async function handler(
   req: NextApiRequest,

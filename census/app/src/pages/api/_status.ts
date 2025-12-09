@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-const INDEXER_API_URL = process.env.INDEXER_API_URL || 'unset';
-const VERIFIER_API_URL = process.env.VERIFIER_API_URL || 'unset';
+const INDEXER_API_URL = process.env.INDEXER_API_URL || process.env.NEXT_PUBLIC_INDEXER_API_URL || 'unset';
+const VERIFIER_API_URL = process.env.VERIFIER_API_URL || process.env.NEXT_PUBLIC_VERIFIER_API_URL || 'unset';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Ping both backends' /health endpoints
