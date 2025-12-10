@@ -12,7 +12,7 @@
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
+      "src": "/api/verifier/(.*)",
       "dest": "/api/server.js"
     },
     {
